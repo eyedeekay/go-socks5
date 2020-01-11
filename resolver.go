@@ -8,16 +8,34 @@ import (
 
 // NameResolver is used to implement custom name resolution
 type NameResolver interface {
-	Resolve(ctx context.Context, name string) (context.Context, net.IP, error)
+	Resolve(ctx context.Context, name string) (context.Context, net.Addr, error)
 }
 
 // DNSResolver uses the system DNS to resolve host names
 type DNSResolver struct{}
 
-func (d DNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
-	addr, err := net.ResolveIPAddr("ip", name)
+func (d DNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.Addr, error) {
+
+	return d.ResolveIP(ctx, name)
+}
+
+func (d DNSResolver) ResolveIP(ctx context.Context, name string) (context.Context, *net.IPAddr, error) {
+	addr, err := ResolveIP("ip", name)
+	return ctx, addr, err
+}
+
+func ResolveIP(network, name string) (*net.IPAddr, error) {
+	addr, err := net.ResolveIPAddr(network, name)
 	if err != nil {
-		return ctx, nil, err
+		ip := net.ParseIP(name)
+		if ip != nil {
+			return &net.IPAddr{
+				IP: ip,
+			}, nil
+		}
+		return &net.IPAddr{
+			IP: net.ParseIP("127.0.0.1"),
+		}, nil
 	}
-	return ctx, addr.IP, err
+	return addr, err
 }

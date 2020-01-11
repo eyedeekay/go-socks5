@@ -1,9 +1,9 @@
 package socks5
 
 import (
-	"testing"
-
 	"golang.org/x/net/context"
+	"net"
+	"testing"
 )
 
 func TestDNSResolver(t *testing.T) {
@@ -15,7 +15,7 @@ func TestDNSResolver(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	if !addr.IsLoopback() {
+	if !addr.(*net.IPAddr).IP.IsLoopback() {
 		t.Fatalf("expected loopback")
 	}
 }

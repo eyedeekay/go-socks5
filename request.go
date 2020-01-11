@@ -44,22 +44,22 @@ type AddressRewriter interface {
 // which may be specified as IPv4, IPv6, or a FQDN
 type AddrSpec struct {
 	FQDN string
-	IP   net.IP
+	Addr net.Addr
 	Port int
 }
 
 func (a *AddrSpec) String() string {
 	if a.FQDN != "" {
-		return fmt.Sprintf("%s (%s):%d", a.FQDN, a.IP, a.Port)
+		return fmt.Sprintf("%s (%s):%d", a.FQDN, a.Addr, a.Port)
 	}
-	return fmt.Sprintf("%s:%d", a.IP, a.Port)
+	return fmt.Sprintf("%s:%d", a.Addr, a.Port)
 }
 
 // Address returns a string suitable to dial; prefer returning IP-based
 // address, fallback to FQDN
 func (a AddrSpec) Address() string {
-	if 0 != len(a.IP) {
-		return net.JoinHostPort(a.IP.String(), strconv.Itoa(a.Port))
+	if 0 != len(a.Addr.String()) {
+		return net.JoinHostPort(a.Addr.String(), strconv.Itoa(a.Port))
 	}
 	return net.JoinHostPort(a.FQDN, strconv.Itoa(a.Port))
 }
@@ -130,7 +130,7 @@ func (s *Server) handleRequest(req *Request, conn conn) error {
 			return fmt.Errorf("Failed to resolve destination '%v': %v", dest.FQDN, err)
 		}
 		ctx = ctx_
-		dest.IP = addr
+		dest.Addr = addr
 	}
 
 	// Apply any address rewrites
@@ -191,8 +191,8 @@ func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) err
 	defer target.Close()
 
 	// Send success
-	local := target.LocalAddr().(*net.TCPAddr)
-	bind := AddrSpec{IP: local.IP, Port: local.Port}
+	local := target.LocalAddr()
+	bind := AddrSpec{Addr: local, Port: local.(*net.TCPAddr).Port}
 	if err := sendReply(conn, successReply, &bind); err != nil {
 		return fmt.Errorf("Failed to send reply: %v", err)
 	}
@@ -261,7 +261,7 @@ func readAddrSpec(r io.Reader) (*AddrSpec, error) {
 	if _, err := r.Read(addrType); err != nil {
 		return nil, err
 	}
-
+	var err error
 	// Handle on a per type basis
 	switch addrType[0] {
 	case ipv4Address:
@@ -269,14 +269,20 @@ func readAddrSpec(r io.Reader) (*AddrSpec, error) {
 		if _, err := io.ReadAtLeast(r, addr, len(addr)); err != nil {
 			return nil, err
 		}
-		d.IP = net.IP(addr)
+		d.Addr, err = ResolveIP("ip", string(addr))
+		if err != nil {
+			return nil, err
+		}
 
 	case ipv6Address:
 		addr := make([]byte, 16)
 		if _, err := io.ReadAtLeast(r, addr, len(addr)); err != nil {
 			return nil, err
 		}
-		d.IP = net.IP(addr)
+		d.Addr, err = ResolveIP("ip6", string(addr))
+		if err != nil {
+			return nil, err
+		}
 
 	case fqdnAddress:
 		if _, err := r.Read(addrType); err != nil {
@@ -320,14 +326,14 @@ func sendReply(w io.Writer, resp uint8, addr *AddrSpec) error {
 		addrBody = append([]byte{byte(len(addr.FQDN))}, addr.FQDN...)
 		addrPort = uint16(addr.Port)
 
-	case addr.IP.To4() != nil:
+	case addr.Addr.(*net.TCPAddr).IP.To4() != nil:
 		addrType = ipv4Address
-		addrBody = []byte(addr.IP.To4())
+		addrBody = []byte(addr.Addr.(*net.TCPAddr).IP.To4())
 		addrPort = uint16(addr.Port)
 
-	case addr.IP.To16() != nil:
+	case addr.Addr.(*net.TCPAddr).IP.To16() != nil:
 		addrType = ipv6Address
-		addrBody = []byte(addr.IP.To16())
+		addrBody = []byte(addr.Addr.(*net.TCPAddr).IP.To16())
 		addrPort = uint16(addr.Port)
 
 	default:
