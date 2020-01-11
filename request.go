@@ -192,7 +192,11 @@ func (s *Server) handleConnect(ctx context.Context, conn conn, req *Request) err
 
 	// Send success
 	local := target.LocalAddr()
-	bind := AddrSpec{Addr: local, Port: local.(*net.TCPAddr).Port}
+	port := 0
+	if tcpclient, ok := local.(*net.TCPAddr); ok {
+		port = tcpclient.Port
+	}
+	bind := AddrSpec{Addr: local, Port: port}
 	if err := sendReply(conn, successReply, &bind); err != nil {
 		return fmt.Errorf("Failed to send reply: %v", err)
 	}
@@ -305,7 +309,6 @@ func readAddrSpec(r io.Reader) (*AddrSpec, error) {
 		return nil, err
 	}
 	d.Port = (int(port[0]) << 8) | int(port[1])
-
 	return d, nil
 }
 
@@ -326,18 +329,23 @@ func sendReply(w io.Writer, resp uint8, addr *AddrSpec) error {
 		addrBody = append([]byte{byte(len(addr.FQDN))}, addr.FQDN...)
 		addrPort = uint16(addr.Port)
 
-	case addr.Addr.(*net.TCPAddr).IP.To4() != nil:
-		addrType = ipv4Address
-		addrBody = []byte(addr.Addr.(*net.TCPAddr).IP.To4())
-		addrPort = uint16(addr.Port)
-
-	case addr.Addr.(*net.TCPAddr).IP.To16() != nil:
-		addrType = ipv6Address
-		addrBody = []byte(addr.Addr.(*net.TCPAddr).IP.To16())
-		addrPort = uint16(addr.Port)
-
 	default:
-		return fmt.Errorf("Failed to format address: %v", addr)
+		switch addr.Addr.(type) {
+		case *net.TCPAddr:
+			switch {
+			case addr.Addr.(*net.TCPAddr).IP.To4() != nil:
+				addrType = ipv4Address
+				addrBody = []byte(addr.Addr.(*net.TCPAddr).IP.To4())
+				addrPort = uint16(addr.Port)
+
+			case addr.Addr.(*net.TCPAddr).IP.To16() != nil:
+				addrType = ipv6Address
+				addrBody = []byte(addr.Addr.(*net.TCPAddr).IP.To16())
+				addrPort = uint16(addr.Port)
+			}
+		default:
+			return fmt.Errorf("Failed to format address: %v", addr)
+		}
 	}
 
 	// Format the message
